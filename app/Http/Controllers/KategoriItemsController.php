@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\KategoriItem;
-use Illuminate\Http\Request;
+use App\Models\MasterItem;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class KategoriItemsController extends Controller
 {
@@ -16,12 +18,8 @@ class KategoriItemsController extends Controller
     public function search(Request $request)
     {
         $query = KategoriItem::withCount('masterItems')
-            ->when($request->name, function ($q, $value) {
-                $q->where('name', 'like', '%' . $value . '%');
-            })
-            ->when($request->code, function ($q, $value) {
-                $q->where('code', 'like', '%' . $value . '%');
-            })
+            ->when($request->name, fn ($q, $value) => $q->where('name', 'like', '%' . $value . '%'))
+            ->when($request->code, fn ($q, $value) => $q->where('code', 'like', '%' . $value . '%'))
             ->orderBy('name');
 
         return response()->json([
@@ -39,6 +37,7 @@ class KategoriItemsController extends Controller
         return view('kategori_items.form.index', [
             'item' => $item,
             'method' => $method,
+            'masterItems' => MasterItem::orderBy('nama')->get(['id', 'kode', 'nama']),
         ]);
     }
 
@@ -46,7 +45,12 @@ class KategoriItemsController extends Controller
     {
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'code' => ['required', 'string', 'max:255', 'unique:kategori_items,code,' . ($id ?: 'NULL') . ',id'],
+            'code' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('kategori_items', 'code')->ignore($id ?: null),
+            ],
             'master_item_ids' => ['nullable', 'array'],
             'master_item_ids.*' => ['integer', 'exists:master_items,id'],
         ]);
@@ -65,18 +69,16 @@ class KategoriItemsController extends Controller
 
     public function singleView($id)
     {
-        $data = KategoriItem::with([
-            'masterItems' => function ($query) {
-                $query->with('categories')->orderBy('nama');
-            }
-        ])->findOrFail($id);
+        $data = KategoriItem::with('masterItems')->findOrFail($id);
 
         return view('kategori_items.single.index', compact('data'));
     }
 
     public function delete($id)
     {
-        KategoriItem::findOrFail($id)->delete();
+        $category = KategoriItem::findOrFail($id);
+        $category->masterItems()->detach();
+        $category->delete();
 
         return redirect('kategori-items');
     }
